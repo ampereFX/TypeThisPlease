@@ -22,6 +22,9 @@ final class HotKeyService {
     private var eventHandler: EventHandlerRef?
     private var registeredHotKeys: [UInt32: EventHotKeyRef] = [:]
     private var handlers: [UInt32: @MainActor () -> Void] = [:]
+    private var configuredRecordingHotKey: HotKey?
+    private var configuredCheckpointHotKey: HotKey?
+    private var isSuspended = false
 
     init() {
         installHandler()
@@ -35,19 +38,35 @@ final class HotKeyService {
     }
 
     func configure(
-        recording: HotKey,
-        checkpoint: HotKey,
+        recording: HotKey?,
+        checkpoint: HotKey?,
         onRecording: @escaping @MainActor () -> Void,
         onCheckpoint: @escaping @MainActor () -> Void
     ) throws {
-        unregisterAll()
+        configuredRecordingHotKey = recording
+        configuredCheckpointHotKey = checkpoint
         handlers = [
             Action.toggleRecording.rawValue: onRecording,
             Action.checkpoint.rawValue: onCheckpoint
         ]
 
-        try register(recording, id: Action.toggleRecording.rawValue)
-        try register(checkpoint, id: Action.checkpoint.rawValue)
+        guard !isSuspended else {
+            unregisterAll()
+            return
+        }
+
+        try registerConfiguredHotKeys()
+    }
+
+    func setSuspended(_ suspended: Bool) {
+        guard isSuspended != suspended else { return }
+        isSuspended = suspended
+        if suspended {
+            unregisterAll()
+            return
+        }
+
+        try? registerConfiguredHotKeys()
     }
 
     private func installHandler() {
@@ -92,7 +111,21 @@ final class HotKeyService {
         registeredHotKeys.removeAll()
     }
 
+    private func registerConfiguredHotKeys() throws {
+        unregisterAll()
+
+        if let configuredRecordingHotKey {
+            try register(configuredRecordingHotKey, id: Action.toggleRecording.rawValue)
+        }
+        if let configuredCheckpointHotKey {
+            try register(configuredCheckpointHotKey, id: Action.checkpoint.rawValue)
+        }
+    }
+
     private func handle(_ eventRef: EventRef?) -> OSStatus {
+        if isSuspended {
+            return noErr
+        }
         var hotKeyID = EventHotKeyID()
         let status = GetEventParameter(
             eventRef,

@@ -7,6 +7,7 @@ final class WindowCoordinator {
     private lazy var draftWindowController = makeDraftWindow()
     private lazy var settingsWindowController = makeSettingsWindow()
     private lazy var hudWindowController = makeHUDWindow()
+    private lazy var onboardingWindowController = makeOnboardingWindow()
 
     init(appModel: AppModel) {
         self.appModel = appModel
@@ -26,6 +27,14 @@ final class WindowCoordinator {
 
     func hideHUD() {
         hudWindowController.window?.orderOut(nil)
+    }
+
+    func showOnboarding() {
+        show(windowController: onboardingWindowController, activate: true)
+    }
+
+    func hideOnboarding() {
+        onboardingWindowController.window?.orderOut(nil)
     }
 
     private func show(windowController: NSWindowController, activate: Bool) {
@@ -82,6 +91,25 @@ final class WindowCoordinator {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.contentView = NSHostingView(rootView: RecordingHUDView().environmentObject(appModel))
+        return NSWindowController(window: panel)
+    }
+
+    private func makeOnboardingWindow() -> NSWindowController {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "TypeThisPlease Setup"
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.moveToActiveSpace]
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.contentView = NSHostingView(rootView: OnboardingView().environmentObject(appModel))
         return NSWindowController(window: panel)
     }
 }

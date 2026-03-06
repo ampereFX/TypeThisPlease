@@ -42,7 +42,14 @@ final class AudioCaptureService {
     private var currentWriter: WriterBox?
     private var sessionDirectoryURL: URL?
     private var selectedDevice: AudioInputDevice?
+    private var levelObserver: (@Sendable (Float) -> Void)?
     private(set) var isRunning = false
+
+    func setLevelObserver(_ observer: (@Sendable (Float) -> Void)?) {
+        lock.lock()
+        levelObserver = observer
+        lock.unlock()
+    }
 
     func start(device: AudioInputDevice?) throws {
         guard !isRunning else { throw CaptureError.alreadyRunning }
@@ -117,7 +124,11 @@ final class AudioCaptureService {
     private func write(buffer: AVAudioPCMBuffer) {
         lock.lock()
         let writer = currentWriter
+        let levelObserver = levelObserver
         lock.unlock()
+        if let levelObserver {
+            levelObserver(Self.calculateLevel(from: buffer))
+        }
         guard let writer else { return }
         try? writer.file.write(from: buffer)
     }
@@ -131,7 +142,7 @@ final class AudioCaptureService {
     }
 
     private func makeWriter(segmentIndex: Int, in directoryURL: URL, format: AVAudioFormat) throws -> WriterBox {
-        let fileURL = directoryURL.appendingPathComponent("segment-\(segmentIndex).caf")
+        let fileURL = directoryURL.appendingPathComponent("segment-\(segmentIndex).wav")
         let file = try AVAudioFile(
             forWriting: fileURL,
             settings: format.settings,
@@ -153,11 +164,75 @@ final class AudioCaptureService {
         currentWriter = nil
         engine = nil
         selectedDevice = nil
+        levelObserver = nil
         isRunning = false
 
         if !keepSessionDirectory, let sessionDirectoryURL {
             try? fileManager.removeItem(at: sessionDirectoryURL)
         }
         sessionDirectoryURL = nil
+    }
+
+    private static func calculateLevel(from buffer: AVAudioPCMBuffer) -> Float {
+        guard buffer.frameLength > 0 else { return 0 }
+
+        switch buffer.format.commonFormat {
+        case .pcmFormatFloat32:
+            guard let channels = buffer.floatChannelData else { return 0 }
+            return normalizedLevel(
+                channels: channels,
+                frameLength: Int(buffer.frameLength),
+                channelCount: Int(buffer.format.channelCount)
+            )
+        case .pcmFormatInt16:
+            guard let channels = buffer.int16ChannelData else { return 0 }
+            return normalizedIntLevel(
+                channels: channels,
+                frameLength: Int(buffer.frameLength),
+                channelCount: Int(buffer.format.channelCount),
+                scale: Float(Int16.max)
+            )
+        case .pcmFormatInt32:
+            guard let channels = buffer.int32ChannelData else { return 0 }
+            return normalizedIntLevel(
+                channels: channels,
+                frameLength: Int(buffer.frameLength),
+                channelCount: Int(buffer.format.channelCount),
+                scale: Float(Int32.max)
+            )
+        default:
+            return 0
+        }
+    }
+
+    private static func normalizedLevel(
+        channels: UnsafePointer<UnsafeMutablePointer<Float>>,
+        frameLength: Int,
+        channelCount: Int
+    ) -> Float {
+        var peak: Float = 0
+        for channelIndex in 0..<channelCount {
+            let channel = channels[channelIndex]
+            for frame in 0..<frameLength {
+                peak = max(peak, abs(channel[frame]))
+            }
+        }
+        return max(0, min(1, peak))
+    }
+
+    private static func normalizedIntLevel<T: BinaryInteger>(
+        channels: UnsafePointer<UnsafeMutablePointer<T>>,
+        frameLength: Int,
+        channelCount: Int,
+        scale: Float
+    ) -> Float {
+        var peak: Float = 0
+        for channelIndex in 0..<channelCount {
+            let channel = channels[channelIndex]
+            for frame in 0..<frameLength {
+                peak = max(peak, abs(Float(channel[frame])) / scale)
+            }
+        }
+        return max(0, min(1, peak))
     }
 }

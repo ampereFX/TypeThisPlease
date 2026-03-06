@@ -4,6 +4,13 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
+    enum MicrophoneTestState: Equatable {
+        case idle
+        case running
+        case succeeded(String)
+        case failed(String)
+    }
+
     @Published var settings: AppSettings
     @Published private(set) var availableDevices: [AudioInputDevice] = []
     @Published private(set) var resolvedDevice: AudioInputDevice?
@@ -20,6 +27,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastTranscript: String = ""
     @Published private(set) var statusMessage: String = ""
     @Published private(set) var elapsedText: String = "00:00"
+    @Published private(set) var microphoneTestState: MicrophoneTestState = .idle
+    @Published private(set) var microphoneTestLevel: Double = 0
+    @Published private(set) var microphoneTestPeakLevel: Double = 0
 
     let permissionsService: PermissionsService
 
@@ -70,6 +80,11 @@ final class AppModel: ObservableObject {
         audioDeviceMonitor.start()
         configureHotKeys()
         refreshModelStatus()
+        if !settings.hasCompletedOnboarding {
+            windowCoordinator?.showOnboarding()
+        } else if !hasTranscriptionBackendReady {
+            statusMessage = recordingReadinessMessage
+        }
     }
 
     var isRecordingActive: Bool {
@@ -80,6 +95,38 @@ final class AppModel: ObservableObject {
         case .idle, .completed, .failed:
             return false
         }
+    }
+
+    var hasTranscriptionBackendReady: Bool {
+        installationStatus.runtimeExists && installationStatus.modelExists
+    }
+
+    var canStartRecording: Bool {
+        isRecordingActive || hasTranscriptionBackendReady
+    }
+
+    var recordingHotKeyDisplayString: String {
+        settings.recordingHotKey?.displayString ?? "Not set"
+    }
+
+    var checkpointHotKeyDisplayString: String {
+        settings.checkpointHotKey?.displayString ?? "Not set"
+    }
+
+    var recordingReadinessMessage: String {
+        if isRecordingActive {
+            return "Recording in progress."
+        }
+        if !installationStatus.runtimeExists && !installationStatus.modelExists {
+            return "Install or configure the Whisper runtime and model in Settings."
+        }
+        if !installationStatus.runtimeExists {
+            return "Install or configure the Whisper runtime in Settings."
+        }
+        if !installationStatus.modelExists {
+            return "Install or configure a Whisper model in Settings."
+        }
+        return "Ready to record."
     }
 
     func toggleRecording() {
@@ -106,24 +153,75 @@ final class AppModel: ObservableObject {
         windowCoordinator?.showSettings()
     }
 
+    func openOnboardingWindow() {
+        windowCoordinator?.showOnboarding()
+    }
+
     func requestMicrophonePermission() {
         Task {
-            _ = await permissionsService.requestMicrophoneAccess()
+            let granted = await permissionsService.requestMicrophoneAccess()
+            if !granted {
+                statusMessage = "Microphone permission is required for recording."
+            }
         }
     }
 
     func requestAccessibilityPermission() {
-        _ = permissionsService.requestAccessibilityAccess(prompt: true)
+        let granted = permissionsService.requestAccessibilityAccess(prompt: true)
+        if !granted {
+            statusMessage = "Accessibility remains optional unless you want auto-paste."
+        }
     }
 
-    func setRecordingHotKey(_ hotKey: HotKey) {
+    func runMicrophoneSelfTest() {
+        Task {
+            await microphoneSelfTest()
+        }
+    }
+
+    func completeOnboarding(openSettings: Bool) {
+        settings.hasCompletedOnboarding = true
+        persistSettings()
+        windowCoordinator?.hideOnboarding()
+        if openSettings {
+            openSettingsWindow()
+        }
+    }
+
+    func setRecordingHotKey(_ hotKey: HotKey?) -> Bool {
+        if let hotKey, hotKey == settings.checkpointHotKey {
+            settings.checkpointHotKey = nil
+            settings.recordingHotKey = hotKey
+            persistSettings()
+            statusMessage = "Moved shortcut from Checkpoint to Start / Stop."
+            return true
+        }
+        guard settings.recordingHotKey != hotKey else { return true }
         settings.recordingHotKey = hotKey
         persistSettings()
+        return true
     }
 
-    func setCheckpointHotKey(_ hotKey: HotKey) {
+    func setCheckpointHotKey(_ hotKey: HotKey?) -> Bool {
+        if let hotKey, hotKey == settings.recordingHotKey {
+            settings.recordingHotKey = nil
+            settings.checkpointHotKey = hotKey
+            persistSettings()
+            statusMessage = "Moved shortcut from Start / Stop to Checkpoint."
+            return true
+        }
+        guard settings.checkpointHotKey != hotKey else { return true }
         settings.checkpointHotKey = hotKey
         persistSettings()
+        return true
+    }
+
+    func beginHotKeyCapture() {
+        hotKeyService.setSuspended(true)
+    }
+
+    func endHotKeyCapture() {
+        hotKeyService.setSuspended(false)
     }
 
     func setOutputAction(_ action: OutputAction) {
@@ -212,6 +310,11 @@ final class AppModel: ObservableObject {
 
     private func startSession() async {
         guard !isRecordingActive else { return }
+        guard hasTranscriptionBackendReady else {
+            statusMessage = recordingReadinessMessage
+            windowCoordinator?.showSettings()
+            return
+        }
         guard await ensureMicrophoneAccess() else {
             statusMessage = "Microphone permission is required."
             return
@@ -247,6 +350,53 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func microphoneSelfTest() async {
+        guard !isRecordingActive else {
+            let message = "Stop the current recording before running the microphone test."
+            microphoneTestState = .failed(message)
+            statusMessage = message
+            return
+        }
+
+        microphoneTestState = .running
+        microphoneTestLevel = 0
+        microphoneTestPeakLevel = 0
+
+        guard await ensureMicrophoneAccess() else {
+            let message = "Microphone permission is required for the self-test."
+            microphoneTestState = .failed(message)
+            statusMessage = message
+            return
+        }
+
+        let activeDevice = resolvedDevice
+        do {
+            audioCaptureService.setLevelObserver { [weak self] level in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let normalized = Double(level)
+                    self.microphoneTestLevel = normalized
+                    self.microphoneTestPeakLevel = max(self.microphoneTestPeakLevel, normalized)
+                }
+            }
+            try audioCaptureService.start(device: activeDevice)
+            try await Task.sleep(for: .seconds(3))
+            _ = try audioCaptureService.stop(finalSegmentIndex: 0)
+            let peakPercent = Int(microphoneTestPeakLevel * 100)
+            let message = activeDevice.map {
+                "Microphone test succeeded with \($0.name). Peak level: \(peakPercent)%."
+            } ?? "Microphone test succeeded with the default input. Peak level: \(peakPercent)%."
+            microphoneTestState = .succeeded(message)
+            statusMessage = message
+        } catch {
+            audioCaptureService.cancel()
+            microphoneTestLevel = 0
+            let message = "Microphone test failed: \(error.localizedDescription)"
+            microphoneTestState = .failed(message)
+            statusMessage = message
+        }
+    }
+
     private func checkpoint() async {
         guard var session else { return }
         guard session.state == .recording else { return }
@@ -260,6 +410,7 @@ final class AppModel: ObservableObject {
             session.state = .failed(error.localizedDescription)
             self.session = session
             statusMessage = error.localizedDescription
+            windowCoordinator?.hideHUD()
         }
     }
 
@@ -286,7 +437,6 @@ final class AppModel: ObservableObject {
             session.state = .failed(error.localizedDescription)
             self.session = session
             statusMessage = error.localizedDescription
-            windowCoordinator?.hideHUD()
         }
     }
 
@@ -425,6 +575,9 @@ final class AppModel: ObservableObject {
             let status = await modelManager.status(configuration: settings.whisperConfiguration)
             await MainActor.run {
                 self.installationStatus = status
+                if !self.isRecordingActive {
+                    self.statusMessage = self.recordingReadinessMessage
+                }
             }
         }
     }

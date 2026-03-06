@@ -17,4 +17,11 @@ struct HotKeyTests {
         #expect(letter.displayString == "⌘A")
         #expect(digit.displayString == "⌥⇧7")
     }
+
+    @Test
+    func modifierlessHotKeysStillRenderKeyLabel() {
+        let singleKey = HotKey(keyCode: UInt32(kVK_ANSI_K), modifiers: [])
+
+        #expect(singleKey.displayString == "K")
+    }
 }

@@ -67,20 +67,20 @@ The implementation assumes:
 - `Services/PermissionsService.swift`
   - Microphone and Accessibility status/request wrappers.
 - `Services/WindowCoordinator.swift`
-  - AppKit window lifecycle for Settings, Draft, and HUD windows.
+  - AppKit window lifecycle for Settings, onboarding, and the floating recording/draft panel.
 
 ### UI
 
 - `UI/MenuBarMenuView.swift`
-  - Menubar window content with start/stop, checkpoint, and navigation actions.
+  - Menubar window content with start/stop readiness gating and navigation actions.
 - `UI/SettingsView.swift`
   - Hotkeys, Whisper config, device priorities, permissions, and output settings.
 - `UI/DraftWindowView.swift`
-  - Ordered draft presentation:
+  - Unified floating surface for recording state and ordered draft presentation:
     - transcript blocks are read-only status-backed blocks
     - manual blocks remain editable
-- `UI/RecordingHUDView.swift`
-  - Floating compact recording status panel.
+- `UI/OnboardingView.swift`
+  - First-launch setup panel for permissions and setup orientation.
 - `UI/HotKeyRecorder.swift`
   - AppKit-backed shortcut recorder control for settings.
 
@@ -89,10 +89,11 @@ The implementation assumes:
 ### Start
 
 1. `AppModel.startSession()` checks microphone permission.
-2. Whisper configuration is pushed into the engine and `prepare()` verifies runtime/model availability.
-3. The active input device is resolved through `AudioDevicePolicy`.
-4. `AudioCaptureService.start(device:)` configures `AVAudioEngine`, optionally binds the selected hardware input, installs a tap, and begins writing the first segment file.
-5. Draft and HUD windows are shown.
+2. Start is only enabled once the runtime and model exist.
+3. Whisper configuration is pushed into the engine and `prepare()` verifies runtime/model availability.
+4. The active input device is resolved through `AudioDevicePolicy`.
+5. `AudioCaptureService.start(device:)` configures `AVAudioEngine`, optionally binds the selected hardware input, installs a tap, and begins writing the first segment file.
+6. The unified floating recording/draft panel is shown.
 
 ### Checkpoint
 
@@ -123,6 +124,13 @@ Checkpoint transcriptions can finish out of order. The implementation avoids out
 - If none of the preferred devices are present, the default input device wins.
 - If the active device disappears during recording, `AppModel` finalizes the session instead of silently switching microphones mid-stream.
 
+## First-launch behavior
+
+- `TypeThisPleaseApp` boots the app model immediately at app launch, not only when the menubar item is opened.
+- If onboarding has not been completed yet, `WindowCoordinator` presents the onboarding panel.
+- Onboarding focuses on microphone permission first and positions Accessibility as optional.
+- The user can dismiss onboarding, but recording still remains disabled until the runtime and model are present.
+
 ## Extension points
 
 ### Add another STT engine
@@ -145,7 +153,7 @@ Do not overload `RecordingSession` for persistence. Introduce a separate stored 
 ## Operational caveats
 
 - The runtime downloader currently assumes direct file URLs, not archives.
-- `AudioCaptureService` writes `.caf` files per segment and keeps the current implementation intentionally simple.
+- `AudioCaptureService` writes `.wav` files per segment and keeps the current implementation intentionally simple.
 - Auto-paste uses simulated `Cmd+V` and therefore depends on Accessibility permission.
 - The codebase favors a clean separable architecture over full production hardening in every subsystem. The next round of work should focus on:
   - stronger process argument handling

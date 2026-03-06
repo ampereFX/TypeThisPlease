@@ -27,10 +27,11 @@ struct WhisperConfiguration: Codable, Equatable, Sendable {
 }
 
 struct AppSettings: Codable, Equatable, Sendable {
-    var recordingHotKey: HotKey = .defaultRecording
-    var checkpointHotKey: HotKey = .defaultCheckpoint
+    var recordingHotKey: HotKey? = .defaultRecording
+    var checkpointHotKey: HotKey? = .defaultCheckpoint
     var outputAction: OutputAction = .copy
     var devicePreferences: [AudioDevicePreference] = []
     var preferredEngineID: String = WhisperCPPTranscriptionEngine.identifier
     var whisperConfiguration = WhisperConfiguration()
+    var hasCompletedOnboarding = false
 }

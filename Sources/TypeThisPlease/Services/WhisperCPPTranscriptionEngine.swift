@@ -58,8 +58,9 @@ actor WhisperCPPTranscriptionEngine: TranscriptionEngine {
             "-of", outputBaseURL.path,
             "-otxt"
         ]
-        if configuration.language != "auto", !configuration.language.isEmpty {
-            arguments += ["-l", configuration.language]
+        let language = configuration.language.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !language.isEmpty {
+            arguments += ["-l", language]
         }
         if !configuration.prompt.isEmpty {
             arguments += ["--prompt", configuration.prompt]

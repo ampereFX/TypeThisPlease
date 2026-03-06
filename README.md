@@ -4,7 +4,8 @@ TypeThisPlease is a native macOS speech-to-text utility built around a menubar w
 
 ## What it does
 
-- Runs as a menubar-first app with a draft window, settings window, and floating recording HUD.
+- Runs as a menubar-first app with a settings window and a single floating recording/draft surface.
+- Shows a first-launch onboarding dialog for permissions and setup orientation.
 - Starts and stops recording from a configurable global hotkey.
 - Supports checkpoint hotkeys that commit the spoken portion into draft placeholders while recording continues.
 - Copies the final transcript to the clipboard and can optionally auto-paste it into the frontmost app.
@@ -31,12 +32,15 @@ TypeThisPlease is a native macOS speech-to-text utility built around a menubar w
 
 1. Install or point the app to a local Whisper-compatible executable and model file.
 2. Open settings from the menubar.
-3. Configure global hotkeys and verify microphone/accessibility permissions.
-4. Start recording from the menubar or the configured hotkey.
-5. Trigger checkpoints to progressively build the draft.
+3. On first launch, use the onboarding dialog to grant microphone access and optionally Accessibility for auto-paste.
+4. Configure the Whisper executable and model in Settings.
+5. Configure global hotkeys and verify the setup state shows both runtime and model as ready.
+6. Start recording from the menubar or the configured hotkey.
+7. Trigger checkpoints to progressively build the draft.
 
 ## Notes
 
 - The bundled runtime download flow expects direct file URLs for the runtime binary and model file.
+- `Start Recording` is intentionally disabled until both the runtime and the model are available.
 - Auto-paste requires Accessibility permission and falls back to clipboard-only delivery when unavailable.
 - The current draft model is append-oriented by design: transcript placeholders and manual text blocks are ordered by checkpoint boundaries.

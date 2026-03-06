@@ -22,8 +22,8 @@ struct RecordingHUDView: View {
             }
 
             HStack(spacing: 10) {
-                Label(appModel.settings.recordingHotKey.displayString, systemImage: "record.circle")
-                Label(appModel.settings.checkpointHotKey.displayString, systemImage: "bookmark")
+                Label(appModel.recordingHotKeyDisplayString, systemImage: "record.circle")
+                Label(appModel.checkpointHotKeyDisplayString, systemImage: "bookmark")
             }
             .font(.caption)
             .foregroundStyle(.secondary)

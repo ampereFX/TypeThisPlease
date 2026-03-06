@@ -38,8 +38,8 @@ struct MenuBarMenuView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Recording: \(appModel.settings.recordingHotKey.displayString)")
-                Text("Checkpoint: \(appModel.settings.checkpointHotKey.displayString)")
+                Text("Recording: \(appModel.recordingHotKeyDisplayString)")
+                Text("Checkpoint: \(appModel.checkpointHotKeyDisplayString)")
                 Text(appModel.statusMessage.isEmpty ? "No recent status." : appModel.statusMessage)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)

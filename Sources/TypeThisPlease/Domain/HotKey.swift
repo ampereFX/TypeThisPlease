@@ -53,8 +53,6 @@ struct HotKey: Codable, Hashable, Sendable {
 
     init?(event: NSEvent) {
         let allowed = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        guard !allowed.isEmpty else { return nil }
-
         var modifiers: Modifiers = []
         if allowed.contains(.command) { modifiers.insert(.command) }
         if allowed.contains(.option) { modifiers.insert(.option) }

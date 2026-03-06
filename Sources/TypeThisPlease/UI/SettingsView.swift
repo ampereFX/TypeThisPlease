@@ -40,20 +40,34 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Start / Stop")
                         .font(.headline)
-                    HotKeyRecorder(hotKey: Binding(
-                        get: { appModel.settings.recordingHotKey },
-                        set: { appModel.setRecordingHotKey($0) }
-                    ))
+                    HotKeyRecorder(
+                        hotKey: appModel.settings.recordingHotKey,
+                        onHotKeyChanged: { appModel.setRecordingHotKey($0) },
+                        onCaptureChanged: { isCapturing in
+                            if isCapturing {
+                                appModel.beginHotKeyCapture()
+                            } else {
+                                appModel.endHotKeyCapture()
+                            }
+                        }
+                    )
                     .frame(height: 44)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Checkpoint")
                         .font(.headline)
-                    HotKeyRecorder(hotKey: Binding(
-                        get: { appModel.settings.checkpointHotKey },
-                        set: { appModel.setCheckpointHotKey($0) }
-                    ))
+                    HotKeyRecorder(
+                        hotKey: appModel.settings.checkpointHotKey,
+                        onHotKeyChanged: { appModel.setCheckpointHotKey($0) },
+                        onCaptureChanged: { isCapturing in
+                            if isCapturing {
+                                appModel.beginHotKeyCapture()
+                            } else {
+                                appModel.endHotKeyCapture()
+                            }
+                        }
+                    )
                     .frame(height: 44)
                 }
             }
@@ -260,6 +274,27 @@ struct SettingsView: View {
                     actionTitle: "Open Prompt",
                     action: appModel.requestAccessibilityPermission
                 )
+
+                HStack(spacing: 12) {
+                    Button("Run Microphone Test") {
+                        appModel.runMicrophoneSelfTest()
+                    }
+                    .disabled(appModel.microphoneTestState == .running)
+                    Button("Show Setup Dialog") {
+                        appModel.openOnboardingWindow()
+                    }
+                }
+
+                MicrophoneLevelMeterView(
+                    level: appModel.microphoneTestState == .running ? appModel.microphoneTestLevel : appModel.microphoneTestPeakLevel,
+                    isActive: appModel.microphoneTestState == .running
+                )
+
+                microphoneTestStatus
+
+                Text("When you launch through `swift run`, macOS permission state can reflect the host app that launched the binary. The microphone self-test verifies real device access from inside this app flow.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -300,6 +335,23 @@ struct SettingsView: View {
             }
             Spacer()
             Button(actionTitle, action: action)
+        }
+    }
+
+    @ViewBuilder
+    private var microphoneTestStatus: some View {
+        switch appModel.microphoneTestState {
+        case .idle:
+            EmptyView()
+        case .running:
+            Label("Testing microphone access…", systemImage: "waveform")
+                .foregroundStyle(.secondary)
+        case .succeeded(let message):
+            Label(message, systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .failed(let message):
+            Label(message, systemImage: "xmark.octagon.fill")
+                .foregroundStyle(.red)
         }
     }
 }

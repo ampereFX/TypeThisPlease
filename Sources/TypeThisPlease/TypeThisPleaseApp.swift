@@ -4,7 +4,6 @@ import SwiftUI
 struct TypeThisPleaseApp: App {
     @NSApplicationDelegateAdaptor(MenuBarAppDelegate.self) private var appDelegate
     @StateObject private var appModel: AppModel
-
     private let windowCoordinator: WindowCoordinator
 
     init() {
