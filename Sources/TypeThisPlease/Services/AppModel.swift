@@ -40,6 +40,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var microphoneTestState: MicrophoneTestState = .idle
     @Published private(set) var microphoneTestLevel: Double = 0
     @Published private(set) var microphoneTestPeakLevel: Double = 0
+    @Published var showCancelConfirmation: Bool = false
 
     let permissionsService: PermissionsService
 
@@ -216,6 +217,16 @@ final class AppModel: ObservableObject {
             return hasTranscriptionBackendReady ? "Start Recording" : "Open Setup"
         }
         return isRecordingActive ? "Stop Recording" : "Finish Review"
+    }
+
+    func cancelSession() {
+        showCancelConfirmation = false
+        audioCaptureService.cancel()
+        session = nil
+        stopTimer()
+        resetWaveform(animated: false)
+        windowCoordinator?.hideRecordingPanel()
+        statusMessage = "Session cancelled."
     }
 
     func toggleRecording() {

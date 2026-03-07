@@ -85,6 +85,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let statusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
         statusItem.isEnabled = false
         menu.addItem(statusItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Quit TypeThisPlease", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem.target = NSApp
+        menu.addItem(quitItem)
     }
 
     @objc

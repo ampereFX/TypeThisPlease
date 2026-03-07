@@ -182,7 +182,7 @@ struct RecordingSession: Identifiable, Equatable, Sendable {
             replaceText(in: clampedRange, with: replacement, renderedSegments: renderedSegments)
         }
 
-        coalesceManualSegments()
+        coalesceSegments()
     }
 
     private mutating func insertText(_ text: String, at location: Int, renderedSegments: [RenderedEditorSegment]) {
@@ -197,10 +197,29 @@ struct RecordingSession: Identifiable, Equatable, Sendable {
             let lower = rendered.range.location
             let upper = NSMaxRange(rendered.range)
             if location > lower && location < upper {
-                updateSegment(rendered.id) { segment in
+                guard let index = segments.firstIndex(where: { $0.id == rendered.id }) else { return }
+                let segment = segments[index]
+                
+                if case .manual = segment.kind {
+                    updateSegment(rendered.id) { seg in
+                        let offset = location - lower
+                        let idx = seg.text.index(seg.text.startIndex, offsetBy: offset)
+                        seg.text.insert(contentsOf: text, at: idx)
+                    }
+                } else {
                     let offset = location - lower
-                    let index = segment.text.index(segment.text.startIndex, offsetBy: offset)
-                    segment.text.insert(contentsOf: text, at: index)
+                    let splitIndex = segment.text.index(segment.text.startIndex, offsetBy: offset)
+                    let prefix = String(segment.text[..<splitIndex])
+                    let suffix = String(segment.text[splitIndex...])
+                    
+                    segments.remove(at: index)
+                    
+                    var insertions: [EditorSegment] = []
+                    insertions.append(EditorSegment(kind: segment.kind, text: prefix))
+                    insertions.append(EditorSegment(kind: .manual, text: text))
+                    insertions.append(EditorSegment(kind: segment.kind, text: suffix))
+                    
+                    segments.insert(contentsOf: insertions, at: index)
                 }
                 return
             }
@@ -231,35 +250,35 @@ struct RecordingSession: Identifiable, Equatable, Sendable {
 
         let firstPrefix = Self.prefix(of: first.text, length: firstPrefixLength)
         let lastSuffix = Self.suffix(of: last.text, length: lastSuffixLength)
-        let mergedText = firstPrefix + replacement + lastSuffix
 
         guard let firstSegmentIndex = segments.firstIndex(where: { $0.id == first.id }),
               let lastSegmentIndex = segments.firstIndex(where: { $0.id == last.id }) else {
             return
         }
 
-        if affected.count == 1 {
-            if mergedText.isEmpty {
-                segments.remove(at: firstSegmentIndex)
-            } else {
-                segments[firstSegmentIndex].text = mergedText
-            }
-            return
-        }
-
         segments.removeSubrange(firstSegmentIndex...lastSegmentIndex)
-        if !mergedText.isEmpty {
-            segments.insert(EditorSegment(kind: .manual, text: mergedText), at: firstSegmentIndex)
+        
+        var newSegments: [EditorSegment] = []
+        if !firstPrefix.isEmpty {
+            newSegments.append(EditorSegment(kind: first.kind, text: firstPrefix))
+        }
+        if !replacement.isEmpty {
+            newSegments.append(EditorSegment(kind: .manual, text: replacement))
+        }
+        if !lastSuffix.isEmpty {
+            newSegments.append(EditorSegment(kind: last.kind, text: lastSuffix))
+        }
+        
+        if !newSegments.isEmpty {
+            segments.insert(contentsOf: newSegments, at: firstSegmentIndex)
         }
     }
 
-    private mutating func coalesceManualSegments() {
+    private mutating func coalesceSegments() {
         var normalized: [EditorSegment] = []
         for segment in segments {
             guard !segment.text.isEmpty || !segment.isEditable else { continue }
-            if case .manual = segment.kind,
-               let last = normalized.last,
-               case .manual = last.kind {
+            if let last = normalized.last, last.kind == segment.kind, segment.isEditable {
                 normalized[normalized.count - 1].text += segment.text
             } else {
                 normalized.append(segment)
@@ -331,6 +350,7 @@ struct RecordingSession: Identifiable, Equatable, Sendable {
 
     private static func normalizedTranscript(_ raw: String, previousText: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         guard !trimmed.isEmpty else { return "" }
         guard let last = previousText.unicodeScalars.last else { return trimmed }
         let firstScalar = trimmed.unicodeScalars.first ?? " ".unicodeScalars.first!

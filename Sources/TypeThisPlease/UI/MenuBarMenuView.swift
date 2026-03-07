@@ -46,9 +46,20 @@ struct MenuBarMenuView: View {
                     .lineLimit(3)
             }
             .font(.caption)
+
+            Divider()
+
+            Button("Quit TypeThisPlease") {
+                handleQuitTap()
+            }
+            .keyboardShortcut("q")
         }
         .padding(16)
         .frame(width: 280)
+    }
+
+    private func handleQuitTap() {
+        NSApplication.shared.terminate(nil)
     }
 
     private func handlePrimaryTap() {

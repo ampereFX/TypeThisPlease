@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SessionEditorView: NSViewRepresentable {
     let segments: [EditorSegment]
+    let isInteractive: Bool
     let onReplace: (NSRange, String, [RenderedEditorSegment]) -> Void
     let onFocusChanged: (Bool) -> Void
 
@@ -23,6 +24,11 @@ struct SessionEditorView: NSViewRepresentable {
         let textView = FocusAwareTextView(frame: .zero, textContainer: textContainer)
         textView.delegate = context.coordinator
         textView.focusHandler = context.coordinator.handleFocusChanged(_:)
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
         textView.drawsBackground = false
         textView.isRichText = false
         textView.allowsUndo = true
@@ -34,7 +40,7 @@ struct SessionEditorView: NSViewRepresentable {
         textView.font = NSFont.systemFont(ofSize: 16, weight: .medium)
         textView.textColor = NSColor.labelColor
         textView.insertionPointColor = NSColor.labelColor
-        textView.textContainerInset = NSSize(width: 18, height: 18)
+        textView.textContainerInset = NSSize(width: 24, height: 24)
         textView.textContainer?.lineFragmentPadding = 4
 
         let scrollView = NSScrollView()
@@ -52,6 +58,16 @@ struct SessionEditorView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         DebugLog.log("updateNSView segments=\(segments.count)", category: "editor")
         context.coordinator.update(segments: segments)
+        
+        if let textView = scrollView.documentView as? NSTextView {
+            textView.isSelectable = isInteractive
+            textView.isEditable = isInteractive
+            if !isInteractive {
+                if textView.window?.firstResponder == textView {
+                    textView.window?.makeFirstResponder(nil)
+                }
+            }
+        }
     }
 
     @MainActor
@@ -107,24 +123,37 @@ struct SessionEditorView: NSViewRepresentable {
             let attributed = NSMutableAttributedString()
             var rendered: [RenderedEditorSegment] = []
             let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.lineSpacing = 4
-            paragraphStyle.paragraphSpacing = 6
+            paragraphStyle.lineSpacing = 16
+            paragraphStyle.paragraphSpacing = 16
 
-            for segment in segments {
+            for (index, segment) in segments.enumerated() {
+                // Add an unstyled space before the segment if needed to separate backgrounds
+                if index > 0 && !segment.text.hasPrefix(" ") && !segments[index - 1].text.hasSuffix(" ") {
+                    attributed.append(NSAttributedString(string: " ", attributes: [
+                        .font: NSFont.systemFont(ofSize: 16, weight: .medium),
+                        .paragraphStyle: paragraphStyle
+                    ]))
+                }
+
+                let style = SegmentVisualStyle(kind: segment.kind, id: segment.id)
                 let attributes: [NSAttributedString.Key: Any] = [
                     .foregroundColor: segment.isEditable ? NSColor.labelColor : NSColor.secondaryLabelColor,
                     .font: NSFont.systemFont(ofSize: 16, weight: segment.isEditable ? .medium : .semibold),
-                    .sessionSegmentStyle: SegmentVisualStyle(kind: segment.kind),
+                    .sessionSegmentStyle: style,
                     .paragraphStyle: paragraphStyle
                 ]
+                
                 let location = attributed.length
-                attributed.append(NSAttributedString(string: segment.text, attributes: attributes))
+                
+                let textToAppend = segment.text
+                attributed.append(NSAttributedString(string: textToAppend, attributes: attributes))
+                
                 rendered.append(
                     RenderedEditorSegment(
                         id: segment.id,
                         kind: segment.kind,
-                        range: NSRange(location: location, length: (segment.text as NSString).length),
-                        text: segment.text
+                        range: NSRange(location: location, length: (textToAppend as NSString).length),
+                        text: textToAppend
                     )
                 )
             }
@@ -135,7 +164,8 @@ struct SessionEditorView: NSViewRepresentable {
                         string: "",
                         attributes: [
                             .font: NSFont.systemFont(ofSize: 16, weight: .medium),
-                            .foregroundColor: NSColor.labelColor
+                            .foregroundColor: NSColor.labelColor,
+                            .paragraphStyle: paragraphStyle
                         ]
                     )
                 )
@@ -167,25 +197,56 @@ private final class FocusAwareTextView: NSTextView {
     }
 }
 
-private final class SegmentVisualStyle: NSObject {
-    let fillColor: NSColor
-    let strokeColor: NSColor
+private enum SegmentVisualKind: String {
+    case transcript
+    case manual
+    case transcribing
+    case recording
 
     init(kind: EditorSegmentKind) {
         switch kind {
-        case .transcript:
-            fillColor = NSColor.controlAccentColor.withAlphaComponent(0.14)
-            strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.34)
-        case .manual:
-            fillColor = NSColor.white.withAlphaComponent(0.08)
-            strokeColor = NSColor.white.withAlphaComponent(0.2)
-        case .transcribing:
-            fillColor = NSColor.systemOrange.withAlphaComponent(0.14)
-            strokeColor = NSColor.systemOrange.withAlphaComponent(0.34)
-        case .recording:
-            fillColor = NSColor.systemRed.withAlphaComponent(0.14)
-            strokeColor = NSColor.systemRed.withAlphaComponent(0.34)
+        case .transcript: self = .transcript
+        case .manual: self = .manual
+        case .transcribing: self = .transcribing
+        case .recording: self = .recording
         }
+    }
+
+    var fillColor: NSColor {
+        switch self {
+        case .transcript: return NSColor.controlAccentColor.withAlphaComponent(0.14)
+        case .manual: return NSColor.systemPurple.withAlphaComponent(0.14)
+        case .transcribing: return NSColor.systemOrange.withAlphaComponent(0.14)
+        case .recording: return NSColor.systemRed.withAlphaComponent(0.14)
+        }
+    }
+
+    var strokeColor: NSColor {
+        switch self {
+        case .transcript: return NSColor.controlAccentColor.withAlphaComponent(0.34)
+        case .manual: return NSColor.systemPurple.withAlphaComponent(0.34)
+        case .transcribing: return NSColor.systemOrange.withAlphaComponent(0.34)
+        case .recording: return NSColor.systemRed.withAlphaComponent(0.34)
+        }
+    }
+}
+
+private final class SegmentVisualStyle: NSObject {
+    let kind: SegmentVisualKind
+    let id: UUID
+
+    init(kind: EditorSegmentKind, id: UUID) {
+        self.kind = SegmentVisualKind(kind: kind)
+        self.id = id
+    }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? SegmentVisualStyle else { return false }
+        return self.id == other.id
+    }
+
+    override var hash: Int {
+        return id.hashValue
     }
 }
 
@@ -198,19 +259,68 @@ private final class SegmentLayoutManager: NSLayoutManager {
 
         storage.enumerateAttribute(.sessionSegmentStyle, in: characterRange, options: []) { value, range, _ in
             guard let style = value as? SegmentVisualStyle else { return }
-            let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            
+            // Find the precise range of non-whitespace characters to highlight
+            var startIdx = range.location
+            var endIdx = NSMaxRange(range)
+            let nsStr = storage.string as NSString
+            
+            while startIdx < endIdx {
+                let char = nsStr.character(at: startIdx)
+                if CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(char)!) {
+                    startIdx += 1
+                } else {
+                    break
+                }
+            }
+            
+            while endIdx > startIdx {
+                let char = nsStr.character(at: endIdx - 1)
+                if CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(char)!) {
+                    endIdx -= 1
+                } else {
+                    break
+                }
+            }
+            
+            if startIdx >= endIdx { return }
+            
+            let trimmedRange = NSRange(location: startIdx, length: endIdx - startIdx)
+            let glyphRange = self.glyphRange(forCharacterRange: trimmedRange, actualCharacterRange: nil)
 
-            self.enumerateEnclosingRects(
-                forGlyphRange: glyphRange,
-                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                in: textContainer
-            ) { rect, _ in
+            // Iterate through each line fragment individually to draw separate boxes
+            var lineFragmentRects: [NSRect] = []
+            
+            var index = glyphRange.location
+            let maxIndex = NSMaxRange(glyphRange)
+            
+            while index < maxIndex {
+                var effectiveRange = NSRange(location: 0, length: 0)
+                _ = self.lineFragmentRect(forGlyphAt: index, effectiveRange: &effectiveRange)
+                
+                // Find the intersection of this line fragment with our glyph range
+                let intersection = NSIntersectionRange(effectiveRange, glyphRange)
+                if intersection.length > 0 {
+                    let boundingRect = self.boundingRect(forGlyphRange: intersection, in: textContainer)
+                    lineFragmentRects.append(boundingRect)
+                }
+                
+                index = NSMaxRange(effectiveRange)
+            }
+
+            for rect in lineFragmentRects {
                 var highlightRect = rect.offsetBy(dx: origin.x, dy: origin.y)
-                highlightRect = highlightRect.insetBy(dx: -2, dy: -1)
-                let path = NSBezierPath(roundedRect: highlightRect, xRadius: 10, yRadius: 10)
-                style.fillColor.setFill()
+                
+                // Add padding around the text inside the bounds
+                highlightRect.origin.x -= 4
+                highlightRect.size.width += 8
+                highlightRect.origin.y -= 2
+                highlightRect.size.height += 4
+                
+                let path = NSBezierPath(roundedRect: highlightRect, xRadius: 4, yRadius: 4)
+                style.kind.fillColor.setFill()
                 path.fill()
-                style.strokeColor.setStroke()
+                style.kind.strokeColor.setStroke()
                 path.lineWidth = 1
                 path.stroke()
             }

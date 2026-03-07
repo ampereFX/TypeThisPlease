@@ -6,17 +6,29 @@ struct DraftWindowView: View {
     var body: some View {
         ZStack(alignment: .top) {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(nsColor: .windowBackgroundColor).opacity(0.9),
+                            Color(nsColor: .underPageBackgroundColor).opacity(0.9)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
                 )
 
             VStack(alignment: .leading, spacing: 18) {
-                header
-                waveform
                 editor
-                hotkeys
+                
+                VStack(spacing: 12) {
+                    waveform
+                    hotkeys
+                }
             }
             .padding(22)
 
@@ -25,45 +37,85 @@ struct DraftWindowView: View {
                     .padding(.top, 12)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+
+            if appModel.showCancelConfirmation {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        appModel.showCancelConfirmation = false
+                    }
+                
+                cancelConfirmationOverlay
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
         }
-        .padding(14)
-        .frame(minWidth: 460, minHeight: 280)
+        .frame(minWidth: 460, minHeight: 380)
         .background(
-            LinearGradient(
-                colors: [
-                    Color(nsColor: .windowBackgroundColor),
-                    Color(nsColor: .underPageBackgroundColor)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Group {
+                if !appModel.showCancelConfirmation {
+                    Button("") {
+                        appModel.showCancelConfirmation = true
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .opacity(0)
+                }
+            }
         )
         .animation(.spring(response: 0.24, dampingFraction: 0.9), value: appModel.transientNotice)
+        .animation(.spring(response: 0.24, dampingFraction: 0.9), value: appModel.showCancelConfirmation)
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(appModel.isRecordingActive ? Color.red : Color.white.opacity(0.3))
-                        .frame(width: 10, height: 10)
-                    Text(appModel.isRecordingActive ? "Recording" : appModel.isReviewing ? "Review" : "Ready")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+    private var cancelConfirmationOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    appModel.showCancelConfirmation = false
                 }
 
-                Text(appModel.panelSubtitle)
+            VStack(spacing: 20) {
+                VStack(spacing: 8) {
+                    Text("Cancel Recording?")
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    Text("All unsaved progress will be lost.")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Keep Recording") {
+                        appModel.showCancelConfirmation = false
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .buttonStyle(.plain)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    Button("Discard") {
+                        appModel.cancelSession()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.red, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
             }
-
-            Spacer()
-
-            Text(appModel.elapsedText)
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(appModel.isRecordingActive ? .primary : .secondary)
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.regularMaterial)
+                    .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+            )
         }
     }
 
@@ -75,12 +127,13 @@ struct DraftWindowView: View {
     private var editor: some View {
         SessionEditorView(
             segments: appModel.session?.segments ?? [],
+            isInteractive: !appModel.showCancelConfirmation,
             onReplace: { range, replacement, renderedSegments in
                 appModel.applyEditorChange(range: range, replacement: replacement, renderedSegments: renderedSegments)
             },
             onFocusChanged: appModel.setEditorFocus
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -103,6 +156,7 @@ struct DraftWindowView: View {
                 action: appModel.createCheckpoint
             )
         }
+        .disabled(appModel.showCancelConfirmation)
     }
 
     private func noticeCapsule(_ notice: AppModel.Notice) -> some View {

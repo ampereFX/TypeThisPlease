@@ -106,7 +106,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     private func makeRecordingPanel() -> NSWindowController {
         DebugLog.log("makeRecordingPanel frame=\(NSStringFromRect(resolvedRecordingPanelFrame()))", category: "window")
-        let panel = NSPanel(
+        let panel = KeyPanel(
             contentRect: resolvedRecordingPanelFrame(),
             styleMask: [.titled, .fullSizeContentView, .resizable],
             backing: .buffered,
@@ -117,7 +117,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         panel.titlebarAppearsTransparent = true
         panel.isFloatingPanel = true
         panel.level = .statusBar
-        panel.collectionBehavior = [.moveToActiveSpace]
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
@@ -126,7 +126,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.minSize = NSSize(width: 460, height: 280)
+        panel.minSize = NSSize(width: 460, height: 380)
         recordingWindow = panel
 
         let rootView = DraftWindowView().environmentObject(appModel)
@@ -208,3 +208,9 @@ private final class DismissOnEscapeWindow: NSWindow {
         performClose(sender)
     }
 }
+
+private final class KeyPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
