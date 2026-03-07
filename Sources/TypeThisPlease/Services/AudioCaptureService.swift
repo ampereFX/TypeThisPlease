@@ -46,12 +46,14 @@ final class AudioCaptureService {
     private(set) var isRunning = false
 
     func setLevelObserver(_ observer: (@Sendable (Float) -> Void)?) {
+        DebugLog.log("setLevelObserver nil=\(observer == nil)", category: "audio")
         lock.lock()
         levelObserver = observer
         lock.unlock()
     }
 
     func start(device: AudioInputDevice?) throws {
+        DebugLog.log("start device='\(device?.name ?? "default")' uid='\(device?.uid ?? "-")' isRunning=\(isRunning)", category: "audio")
         guard !isRunning else { throw CaptureError.alreadyRunning }
 
         let engine = AVAudioEngine()
@@ -68,6 +70,7 @@ final class AudioCaptureService {
         }
 
         let format = inputNode.inputFormat(forBus: 0)
+        DebugLog.log("Input format sampleRate=\(format.sampleRate) channels=\(format.channelCount) commonFormat=\(format.commonFormat.rawValue)", category: "audio")
         let sessionDirectoryURL = try makeSessionDirectory()
         let initialWriter = try makeWriter(segmentIndex: 0, in: sessionDirectoryURL, format: format)
 
@@ -83,14 +86,17 @@ final class AudioCaptureService {
         do {
             try engine.start()
             isRunning = true
+            DebugLog.log("Audio engine started. sessionDirectory='\(sessionDirectoryURL.path)'", category: "audio")
         } catch {
             inputNode.removeTap(onBus: 0)
             reset()
+            DebugLog.log("Audio engine failed to start: \(error.localizedDescription)", category: "audio")
             throw CaptureError.engineStartFailed(error.localizedDescription)
         }
     }
 
     func checkpoint(segmentIndex: Int) throws -> TranscriptionSegment {
+        DebugLog.log("checkpoint segmentIndex=\(segmentIndex) isRunning=\(isRunning)", category: "audio")
         guard isRunning, let engine, let sessionDirectoryURL else {
             throw CaptureError.notRunning
         }
@@ -100,10 +106,12 @@ final class AudioCaptureService {
         guard let completed = swapWriter(nextWriter) else {
             throw CaptureError.notRunning
         }
+        DebugLog.log("checkpoint completed segment file='\(completed.segment.fileURL.path)' nextWriter='\(nextWriter.segment.fileURL.path)'", category: "audio")
         return completed.segment
     }
 
     func stop(finalSegmentIndex: Int) throws -> TranscriptionSegment? {
+        DebugLog.log("stop finalSegmentIndex=\(finalSegmentIndex) isRunning=\(isRunning)", category: "audio")
         guard isRunning, let engine else { throw CaptureError.notRunning }
 
         engine.inputNode.removeTap(onBus: 0)
@@ -112,10 +120,12 @@ final class AudioCaptureService {
 
         let completed = swapWriter(nil)?.segment
         reset(keepSessionDirectory: true)
+        DebugLog.log("stop completedSegment='\(completed?.fileURL.path ?? "nil")'", category: "audio")
         return completed
     }
 
     func cancel() {
+        DebugLog.log("cancel", category: "audio")
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         reset()
@@ -138,6 +148,7 @@ final class AudioCaptureService {
             .appendingPathComponent("TypeThisPlease")
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        DebugLog.log("Created session directory '\(url.path)'", category: "audio")
         return url
     }
 
@@ -149,6 +160,7 @@ final class AudioCaptureService {
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
+        DebugLog.log("Created writer segmentIndex=\(segmentIndex) path='\(fileURL.path)'", category: "audio")
         return WriterBox(segment: TranscriptionSegment(id: UUID(), index: segmentIndex, fileURL: fileURL), file: file)
     }
 
@@ -161,6 +173,7 @@ final class AudioCaptureService {
     }
 
     private func reset(keepSessionDirectory: Bool = false) {
+        DebugLog.log("reset keepSessionDirectory=\(keepSessionDirectory) sessionDirectory='\(sessionDirectoryURL?.path ?? "nil")'", category: "audio")
         currentWriter = nil
         engine = nil
         selectedDevice = nil

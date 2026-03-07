@@ -4,7 +4,7 @@ This document is the fast path for another agent or engineer to understand the c
 
 ## Product shape
 
-TypeThisPlease is a menubar-first macOS app for local speech-to-text. A user starts recording from a global shortcut or the menubar, optionally drops one or more checkpoints while speaking, types manual corrections between committed speech segments, and then finalizes the session into a clipboard-ready transcript.
+TypeThisPlease is a menubar-first macOS app for local speech-to-text. A user starts recording from a global shortcut or the menubar, optionally drops one or more checkpoints while speaking, edits the draft directly inside a single floating panel, and then finalizes the session into a clipboard-ready transcript.
 
 The implementation assumes:
 
@@ -30,7 +30,7 @@ The implementation assumes:
 
 - `Domain/AppSettings.swift`
   - Persistent user settings.
-  - Hotkeys, output mode, device preferences, Whisper runtime/model config.
+  - Hotkeys, output mode, finalize behavior, device preferences, panel frame persistence, and Whisper runtime/model config.
 - `Domain/HotKey.swift`
   - Serializable hotkey representation.
   - Carbon and AppKit modifier bridging.
@@ -38,8 +38,8 @@ The implementation assumes:
   - Runtime audio device model.
   - Device priority resolution logic.
 - `Domain/RecordingSession.swift`
-  - Draft/session state machine model.
-  - Placeholder insertion and transcript/manual block ordering.
+  - Recording/review state machine model.
+  - Inline editor segment ordering for transcript, manual, transcribing, and recording markers.
 - `Domain/TranscriptionEngine.swift`
   - Stable protocol boundary for STT backends and future post-processors.
 
@@ -47,7 +47,7 @@ The implementation assumes:
 
 - `Services/AppModel.swift`
   - Main orchestration hub.
-  - Owns current settings, session state, device list, engine status, permissions exposure, and top-level user actions.
+  - Owns current settings, session state, device list, engine status, permissions exposure, waveform samples, transient notices, and top-level user actions.
   - This is the place to extend first if you add new session behaviors.
 - `Services/HotKeyService.swift`
   - Registers global hotkeys through Carbon.
@@ -67,18 +67,23 @@ The implementation assumes:
 - `Services/PermissionsService.swift`
   - Microphone and Accessibility status/request wrappers.
 - `Services/WindowCoordinator.swift`
-  - AppKit window lifecycle for Settings, onboarding, and the floating recording/draft panel.
+  - AppKit window lifecycle for Settings, onboarding, and the floating recording/review panel.
+  - Persists the panel frame and restores it with a main-screen fallback if the saved display is gone.
 
 ### UI
 
 - `UI/MenuBarMenuView.swift`
   - Menubar window content with start/stop readiness gating and navigation actions.
 - `UI/SettingsView.swift`
-  - Hotkeys, Whisper config, device priorities, permissions, and output settings.
+  - Hotkeys, Whisper config, device priorities, permissions, output settings, and finalize behavior.
 - `UI/DraftWindowView.swift`
-  - Unified floating surface for recording state and ordered draft presentation:
-    - transcript blocks are read-only status-backed blocks
-    - manual blocks remain editable
+  - Unified floating surface for recording, inline editing, and review.
+  - Hosts the waveform, the AppKit-backed editor, transient notices, and clickable hotkey chips.
+- `UI/SessionEditorView.swift`
+  - `NSTextView` bridge for the draft editor.
+  - Rebuilds the attributed document from session segments and routes text edits back into `RecordingSession`.
+- `UI/WaveformView.swift`
+  - Lightweight live waveform/silent-review visual.
 - `UI/OnboardingView.swift`
   - First-launch setup panel for permissions and setup orientation.
 - `UI/HotKeyRecorder.swift`
@@ -93,28 +98,30 @@ The implementation assumes:
 3. Whisper configuration is pushed into the engine and `prepare()` verifies runtime/model availability.
 4. The active input device is resolved through `AudioDevicePolicy`.
 5. `AudioCaptureService.start(device:)` configures `AVAudioEngine`, optionally binds the selected hardware input, installs a tap, and begins writing the first segment file.
-6. The unified floating recording/draft panel is shown.
+6. The unified floating recording/review panel is shown and restored to its last size/position if possible.
+7. Incoming audio levels feed a small waveform buffer that drives the live visual on the panel.
 
 ### Checkpoint
 
 1. `AppModel.checkpoint()` asks `AudioCaptureService` to rotate to a new segment file.
 2. The completed segment is enqueued for transcription.
-3. `RecordingSession.insertCheckpointPlaceholder(for:)` appends:
-   - one transcript placeholder block
-   - one manual text block
-4. When transcription returns, the placeholder is filled in place, preserving the manual insertion point that the user may already have started editing.
+3. `RecordingSession.insertCheckpointPlaceholder(for:)` replaces the trailing recording marker with a transcribing marker and appends a fresh recording marker at the end.
+4. When transcription returns, the transcribing marker is replaced in place with a transcript segment.
+5. Manual user edits stay in the same editor and are tracked as manual segments when text is inserted across boundaries.
 
 ### Finalize
 
-1. `AppModel.finalizeSession()` stops capture and appends the final transcript placeholder.
-2. All pending segment transcriptions run to completion.
-3. `RecordingSession.assembledDraft` concatenates the ordered blocks.
-4. Optional post-processing runs here if a `PostProcessor` is wired in later.
-5. `OutputService` copies or copies+pastes the final text.
+1. `AppModel.toggleRecording()` handles both the first stop and the optional review-confirmation stop.
+2. In `Deliver Immediately` mode, stop moves the session into `.finalizing` and delivery happens as soon as all pending transcriptions have completed.
+3. In `Review Before Delivery` mode, the first stop moves the session into `.review`, freezes the waveform into a silent state, and keeps the panel open for final editing.
+4. A second stop in review mode only delivers when no transcription is still pending; otherwise it is ignored and a transient notice is shown.
+5. `RecordingSession.assembledDraft` concatenates only resolved transcript/manual text, never marker text.
+6. Optional post-processing runs here if a `PostProcessor` is wired in later.
+7. `OutputService` copies or copies+pastes the final text, but active editor focus downgrades `Copy and Paste` to `Copy` to avoid pasting into the panel itself.
 
-## Why placeholders matter
+## Why inline markers matter
 
-Checkpoint transcriptions can finish out of order. The implementation avoids output reordering by inserting placeholder blocks at checkpoint time instead of append-on-completion time. That is the key structural choice that makes mixed spoken/manual drafting predictable.
+Checkpoint transcriptions can finish out of order. The implementation avoids output reordering by inserting inline marker segments at checkpoint time instead of append-on-completion time. That is the key structural choice that makes mixed spoken/manual drafting predictable while still keeping the user inside one continuous editor.
 
 ## Device handling
 
@@ -155,8 +162,9 @@ Do not overload `RecordingSession` for persistence. Introduce a separate stored 
 - The runtime downloader currently assumes direct file URLs, not archives.
 - `AudioCaptureService` writes `.wav` files per segment and keeps the current implementation intentionally simple.
 - Auto-paste uses simulated `Cmd+V` and therefore depends on Accessibility permission.
+- The editor currently treats complex cross-segment edits by collapsing the touched span into a manual segment. This is a deliberate simplification to keep the single-editor model stable without freezing user edits.
 - The codebase favors a clean separable architecture over full production hardening in every subsystem. The next round of work should focus on:
   - stronger process argument handling
   - archive extraction for runtime installs
-  - richer error surfacing in the draft UI
+  - richer segment-editing tests
   - more exhaustive session/orchestration tests

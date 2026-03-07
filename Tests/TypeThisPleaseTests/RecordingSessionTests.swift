@@ -1,40 +1,57 @@
+import Foundation
 import Testing
 @testable import TypeThisPlease
 
 struct RecordingSessionTests {
     @Test
-    func checkpointCreatesTranscriptAndManualBlocks() {
+    func checkpointCreatesTranscribingAndRecordingMarkers() {
         var session = RecordingSession.begin(activeDevice: nil)
 
         session.insertCheckpointPlaceholder(for: 0)
 
-        #expect(session.blocks.count == 2)
+        #expect(session.segments.count == 2)
         #expect({
-            if case .transcript(0) = session.blocks[0].kind { return true }
+            if case .transcribing(0) = session.segments[0].kind { return true }
             return false
         }())
         #expect({
-            if case .manual(0) = session.blocks[1].kind { return true }
+            if case .recording = session.segments[1].kind { return true }
             return false
         }())
     }
 
     @Test
-    func transcriptsAndManualTextAssembleInDeclaredOrder() {
+    func transcriptsAndInsertedManualTextAssembleInDeclaredOrder() {
         var session = RecordingSession.begin(activeDevice: nil)
 
         session.insertCheckpointPlaceholder(for: 0)
         session.markTranscriptReady("Hello world.", for: 0)
-        let manualBlock = session.blocks[1]
-        session.updateManualBlock(manualBlock.id, text: " CustomWord")
+        session.applyEditorChange(
+            range: NSRange(location: "Hello world.".count, length: 0),
+            replacement: " CustomWord",
+            renderedSegments: [
+                RenderedEditorSegment(
+                    id: session.segments[0].id,
+                    kind: session.segments[0].kind,
+                    range: NSRange(location: 0, length: "Hello world.".count),
+                    text: "Hello world."
+                ),
+                RenderedEditorSegment(
+                    id: session.segments[1].id,
+                    kind: session.segments[1].kind,
+                    range: NSRange(location: "Hello world.".count, length: "Listening".count),
+                    text: "Listening"
+                )
+            ]
+        )
         session.insertFinalPlaceholder(for: 1)
-        session.markTranscriptReady(" continues here.", for: 1)
+        session.markTranscriptReady("continues here.", for: 1)
 
         #expect(session.assembledDraft == "Hello world. CustomWord continues here.")
     }
 
     @Test
-    func pendingTranscriptCountIgnoresReadyBlocks() {
+    func pendingTranscriptCountIgnoresResolvedSegments() {
         var session = RecordingSession.begin(activeDevice: nil)
 
         session.insertCheckpointPlaceholder(for: 0)

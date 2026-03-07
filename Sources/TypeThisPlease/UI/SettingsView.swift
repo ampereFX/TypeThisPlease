@@ -76,20 +76,34 @@ struct SettingsView: View {
 
     private var outputSection: some View {
         SettingsCard(title: "Output", subtitle: "Control how the final transcript leaves the app.") {
-            Picker("Delivery", selection: Binding(
-                get: { appModel.settings.outputAction },
-                set: { appModel.setOutputAction($0) }
-            )) {
-                ForEach(OutputAction.allCases) { action in
-                    Text(action.title).tag(action)
+            VStack(alignment: .leading, spacing: 16) {
+                Picker("Delivery", selection: Binding(
+                    get: { appModel.settings.outputAction },
+                    set: { appModel.setOutputAction($0) }
+                )) {
+                    ForEach(OutputAction.allCases) { action in
+                        Text(action.title).tag(action)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
+                .pickerStyle(.segmented)
 
-            if appModel.settings.outputAction == .copyAndPaste && appModel.permissionsService.accessibilityState != .granted {
-                Text("Accessibility permission is required for auto-paste. The app falls back to clipboard-only if it is missing.")
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
+                Picker("Finalize", selection: Binding(
+                    get: { appModel.settings.finalizeBehavior },
+                    set: { newValue in
+                        appModel.updateFinalizeBehavior(newValue)
+                    }
+                )) {
+                    ForEach(FinalizeBehavior.allCases) { behavior in
+                        Text(behavior.title).tag(behavior)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if appModel.settings.outputAction == .copyAndPaste && appModel.permissionsService.accessibilityState != .granted {
+                    Text("Accessibility permission is required for auto-paste. The app falls back to clipboard-only if it is missing.")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                }
             }
         }
     }
@@ -185,7 +199,13 @@ struct SettingsView: View {
                 pathRow(
                     title: "Executable",
                     text: Binding(
-                        get: { appModel.settings.whisperConfiguration.executablePath },
+                        get: {
+                            let explicitPath = appModel.settings.whisperConfiguration.executablePath
+                            if !explicitPath.isEmpty {
+                                return explicitPath
+                            }
+                            return appModel.installationStatus.runtimeURL?.path ?? ""
+                        },
                         set: { newValue in
                             appModel.updateWhisperConfiguration { $0.executablePath = newValue }
                         }
@@ -196,7 +216,13 @@ struct SettingsView: View {
                 pathRow(
                     title: "Model",
                     text: Binding(
-                        get: { appModel.settings.whisperConfiguration.modelPath },
+                        get: {
+                            let explicitPath = appModel.settings.whisperConfiguration.modelPath
+                            if !explicitPath.isEmpty {
+                                return explicitPath
+                            }
+                            return appModel.installationStatus.modelURL?.path ?? ""
+                        },
                         set: { newValue in
                             appModel.updateWhisperConfiguration { $0.modelPath = newValue }
                         }

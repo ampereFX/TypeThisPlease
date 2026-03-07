@@ -27,6 +27,7 @@ final class HotKeyService {
     private var isSuspended = false
 
     init() {
+        DebugLog.log("HotKeyService init", category: "hotkey")
         installHandler()
     }
 
@@ -43,6 +44,10 @@ final class HotKeyService {
         onRecording: @escaping @MainActor () -> Void,
         onCheckpoint: @escaping @MainActor () -> Void
     ) throws {
+        DebugLog.log(
+            "Configuring hotkeys. recording='\(recording?.displayString ?? "nil")' checkpoint='\(checkpoint?.displayString ?? "nil")' suspended=\(isSuspended)",
+            category: "hotkey"
+        )
         configuredRecordingHotKey = recording
         configuredCheckpointHotKey = checkpoint
         handlers = [
@@ -51,6 +56,7 @@ final class HotKeyService {
         ]
 
         guard !isSuspended else {
+            DebugLog.log("HotKeyService is suspended; unregistering instead of registering.", category: "hotkey")
             unregisterAll()
             return
         }
@@ -61,6 +67,7 @@ final class HotKeyService {
     func setSuspended(_ suspended: Bool) {
         guard isSuspended != suspended else { return }
         isSuspended = suspended
+        DebugLog.log("setSuspended -> \(suspended)", category: "hotkey")
         if suspended {
             unregisterAll()
             return
@@ -70,6 +77,7 @@ final class HotKeyService {
     }
 
     private func installHandler() {
+        DebugLog.log("Installing Carbon hotkey handler", category: "hotkey")
         var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let callback: EventHandlerUPP = { _, eventRef, userData in
             guard let userData else { return noErr }
@@ -88,6 +96,7 @@ final class HotKeyService {
     }
 
     private func register(_ hotKey: HotKey, id: UInt32) throws {
+        DebugLog.log("Registering hotkey id=\(id) key='\(hotKey.displayString)' code=\(hotKey.keyCode) modifiers=\(hotKey.modifiers.rawValue)", category: "hotkey")
         let hotKeyID = EventHotKeyID(signature: signature, id: id)
         var hotKeyRef: EventHotKeyRef?
         let status = RegisterEventHotKey(
@@ -105,6 +114,9 @@ final class HotKeyService {
     }
 
     private func unregisterAll() {
+        if !registeredHotKeys.isEmpty {
+            DebugLog.log("Unregistering \(registeredHotKeys.count) hotkeys", category: "hotkey")
+        }
         for hotKeyRef in registeredHotKeys.values {
             UnregisterEventHotKey(hotKeyRef)
         }
@@ -124,6 +136,7 @@ final class HotKeyService {
 
     private func handle(_ eventRef: EventRef?) -> OSStatus {
         if isSuspended {
+            DebugLog.log("Ignoring hotkey event because service is suspended.", category: "hotkey")
             return noErr
         }
         var hotKeyID = EventHotKeyID()
@@ -137,9 +150,11 @@ final class HotKeyService {
             &hotKeyID
         )
         guard status == noErr else { return status }
+        DebugLog.log("Received hotkey event id=\(hotKeyID.id)", category: "hotkey")
 
         if let handler = handlers[hotKeyID.id] {
             Task { @MainActor in
+                DebugLog.log("Dispatching handler for hotkey id=\(hotKeyID.id)", category: "hotkey")
                 handler()
             }
         }
