@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+private enum SegmentRenderMetrics {
+    static let lineSpacing: CGFloat = 5
+    static let paragraphSpacing: CGFloat = 4
+    static let interSegmentSpacer = "   "
+}
+
 struct SessionEditorView: NSViewRepresentable {
     let segments: [EditorSegment]
     let isInteractive: Bool
@@ -123,14 +129,13 @@ struct SessionEditorView: NSViewRepresentable {
             let attributed = NSMutableAttributedString()
             var rendered: [RenderedEditorSegment] = []
             let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.lineSpacing = 2
-            paragraphStyle.paragraphSpacing = 4
-            let interSegmentSpacer = "   "
+            paragraphStyle.lineSpacing = SegmentRenderMetrics.lineSpacing
+            paragraphStyle.paragraphSpacing = SegmentRenderMetrics.paragraphSpacing
 
             for (index, segment) in segments.enumerated() {
                 // Always add a neutral spacer between segments so their frames do not touch.
                 if index > 0 {
-                    attributed.append(NSAttributedString(string: interSegmentSpacer, attributes: [
+                    attributed.append(NSAttributedString(string: SegmentRenderMetrics.interSegmentSpacer, attributes: [
                         .font: NSFont.systemFont(ofSize: 16, weight: .medium),
                         .paragraphStyle: paragraphStyle
                     ]))
@@ -297,22 +302,19 @@ private final class SegmentLayoutManager: NSLayoutManager {
             
             while index < maxIndex {
                 var effectiveRange = NSRange(location: 0, length: 0)
-                let usedRect = self.lineFragmentUsedRect(forGlyphAt: index, effectiveRange: &effectiveRange, withoutAdditionalLayout: true)
+                _ = self.lineFragmentRect(forGlyphAt: index, effectiveRange: &effectiveRange)
                 
                 // Find the intersection of this line fragment with our glyph range
                 let intersection = NSIntersectionRange(effectiveRange, glyphRange)
                 if intersection.length > 0 {
                     let boundingRect = self.boundingRect(forGlyphRange: intersection, in: textContainer)
-                    var tightRect = boundingRect
-                    tightRect.origin.y = usedRect.origin.y
-                    tightRect.size.height = usedRect.height
-                    lineFragmentRects.append(tightRect)
+                    lineFragmentRects.append(boundingRect)
                 }
                 
                 index = NSMaxRange(effectiveRange)
             }
 
-            for rect in lineFragmentRects {
+            for (lineIndex, rect) in lineFragmentRects.enumerated() {
                 var highlightRect = rect.offsetBy(dx: origin.x, dy: origin.y)
                 
                 // Keep the segment highlight fully inside the line fragment.
@@ -320,7 +322,11 @@ private final class SegmentLayoutManager: NSLayoutManager {
                 highlightRect.origin.x -= 4
                 highlightRect.size.width += 8
                 highlightRect.origin.y += 1
-                highlightRect.size.height = max(1, highlightRect.size.height - 2)
+                let isLastLine = lineIndex == lineFragmentRects.count - 1
+                let lineSpacingCompensation = isLastLine ? 0 : SegmentRenderMetrics.lineSpacing
+                // `lineSpacing` should increase distance between lines, not the segment chip height.
+                // Only compensate non-final lines because the last line does not carry extra spacing below.
+                highlightRect.size.height = max(1, highlightRect.size.height - 2 - lineSpacingCompensation)
                 
                 let path = NSBezierPath(roundedRect: highlightRect, xRadius: 4, yRadius: 4)
                 style.kind.fillColor.setFill()
