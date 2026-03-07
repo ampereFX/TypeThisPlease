@@ -123,13 +123,14 @@ struct SessionEditorView: NSViewRepresentable {
             let attributed = NSMutableAttributedString()
             var rendered: [RenderedEditorSegment] = []
             let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.lineSpacing = 16
-            paragraphStyle.paragraphSpacing = 16
+            paragraphStyle.lineSpacing = 2
+            paragraphStyle.paragraphSpacing = 4
+            let interSegmentSpacer = "   "
 
             for (index, segment) in segments.enumerated() {
-                // Add an unstyled space before the segment if needed to separate backgrounds
-                if index > 0 && !segment.text.hasPrefix(" ") && !segments[index - 1].text.hasSuffix(" ") {
-                    attributed.append(NSAttributedString(string: " ", attributes: [
+                // Always add a neutral spacer between segments so their frames do not touch.
+                if index > 0 {
+                    attributed.append(NSAttributedString(string: interSegmentSpacer, attributes: [
                         .font: NSFont.systemFont(ofSize: 16, weight: .medium),
                         .paragraphStyle: paragraphStyle
                     ]))
@@ -296,13 +297,16 @@ private final class SegmentLayoutManager: NSLayoutManager {
             
             while index < maxIndex {
                 var effectiveRange = NSRange(location: 0, length: 0)
-                _ = self.lineFragmentRect(forGlyphAt: index, effectiveRange: &effectiveRange)
+                let usedRect = self.lineFragmentUsedRect(forGlyphAt: index, effectiveRange: &effectiveRange, withoutAdditionalLayout: true)
                 
                 // Find the intersection of this line fragment with our glyph range
                 let intersection = NSIntersectionRange(effectiveRange, glyphRange)
                 if intersection.length > 0 {
                     let boundingRect = self.boundingRect(forGlyphRange: intersection, in: textContainer)
-                    lineFragmentRects.append(boundingRect)
+                    var tightRect = boundingRect
+                    tightRect.origin.y = usedRect.origin.y
+                    tightRect.size.height = usedRect.height
+                    lineFragmentRects.append(tightRect)
                 }
                 
                 index = NSMaxRange(effectiveRange)
@@ -311,11 +315,12 @@ private final class SegmentLayoutManager: NSLayoutManager {
             for rect in lineFragmentRects {
                 var highlightRect = rect.offsetBy(dx: origin.x, dy: origin.y)
                 
-                // Add padding around the text inside the bounds
+                // Keep the segment highlight fully inside the line fragment.
+                // Upward expansion gets clipped by AppKit's text drawing clip region.
                 highlightRect.origin.x -= 4
                 highlightRect.size.width += 8
-                highlightRect.origin.y -= 2
-                highlightRect.size.height += 4
+                highlightRect.origin.y += 1
+                highlightRect.size.height = max(1, highlightRect.size.height - 2)
                 
                 let path = NSBezierPath(roundedRect: highlightRect, xRadius: 4, yRadius: 4)
                 style.kind.fillColor.setFill()
